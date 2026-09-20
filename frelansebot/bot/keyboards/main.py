@@ -1,67 +1,74 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 from collector.filters import FILTER_CATEGORIES, FILTER_STACKS
 
-# Текст кнопки архива — должен совпадать с хендлером в orders.py
-BTN_OLDER = "Посмотреть"
-BTN_ORDERS = "📋 Последние заказы"
-BTN_FILTERS = "⚙️ Мои фильтры"
+# Reply-кнопки — тексты должны совпадать с хендлерами
+BTN_MENU = "🏠 Меню"
+BTN_FILTERS = "⚙️ Фильтры"
+BTN_ORDERS = "📋 Заказы"
+BTN_OLDER = "📂 Архив"
+BTN_NOTIFY = "🔔 Уведомления"
 BTN_HELP = "ℹ️ Помощь"
 
 MAIN_KB = ReplyKeyboardMarkup(
     keyboard=[
-        [
-            KeyboardButton(text=BTN_ORDERS),
-            KeyboardButton(text=BTN_OLDER),
-        ],
+        [KeyboardButton(text=BTN_MENU)],
         [
             KeyboardButton(text=BTN_FILTERS),
-            KeyboardButton(text=BTN_HELP),
+            KeyboardButton(text=BTN_ORDERS),
         ],
+        [
+            KeyboardButton(text=BTN_OLDER),
+            KeyboardButton(text=BTN_NOTIFY),
+        ],
+        [KeyboardButton(text=BTN_HELP)],
     ],
     resize_keyboard=True,
     is_persistent=True,
 )
 
 
-def admin_keyboard() -> ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
-    builder.button(text=BTN_ORDERS)
-    builder.button(text=BTN_OLDER)
-    builder.button(text=BTN_FILTERS)
-    builder.button(text=BTN_HELP)
-    builder.adjust(2, 2)
-    return builder.as_markup(resize_keyboard=True, is_persistent=True)
-
-
-def older_orders_keyboard() -> InlineKeyboardMarkup:
-    """Кнопка после свежих заказов — открыть архив под фильтры."""
+def main_menu_keyboard(*, notify_on: bool = True) -> InlineKeyboardMarkup:
+    """Главное inline-меню управления (в стиле lead-ботов)."""
+    notify_label = "🔔 Уведомления: Вкл ✅" if notify_on else "🔕 Уведомления: Выкл"
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="⚙️ Настроить фильтры", callback_data="menu:filters")],
             [
-                InlineKeyboardButton(
-                    text="Посмотреть старше недели",
-                    callback_data="orders:older",
-                )
-            ]
+                InlineKeyboardButton(text="📋 Свежие заказы", callback_data="menu:orders"),
+                InlineKeyboardButton(text="📂 Архив", callback_data="menu:older"),
+            ],
+            [InlineKeyboardButton(text=notify_label, callback_data="menu:notify")],
+            [InlineKeyboardButton(text="ℹ️ Справка", callback_data="menu:help")],
         ]
     )
 
 
-def back_keyboard() -> InlineKeyboardMarkup:
+def older_orders_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data="back_main")]]
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📂 Посмотреть архив старше недели",
+                    callback_data="orders:older",
+                )
+            ],
+            [InlineKeyboardButton(text="🏠 В меню", callback_data="menu:home")],
+        ]
+    )
+
+
+def back_to_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🏠 В меню", callback_data="menu:home")]]
     )
 
 
 def filters_keyboard(active_keys: set[str]) -> InlineKeyboardMarkup:
-    """Одно меню: категории + стеки, без переключения страниц."""
+    """Категории + стеки + возврат в меню."""
     rows: list[list[InlineKeyboardButton]] = []
 
-    rows.append(
-        [InlineKeyboardButton(text="📂 Категории", callback_data="flt:noop")]
-    )
+    rows.append([InlineKeyboardButton(text="📂 Категории", callback_data="flt:noop")])
     for cat in FILTER_CATEGORIES:
         key = str(cat["key"])
         check = "✅ " if key in active_keys else ""
@@ -74,9 +81,7 @@ def filters_keyboard(active_keys: set[str]) -> InlineKeyboardMarkup:
             ]
         )
 
-    rows.append(
-        [InlineKeyboardButton(text="🛠 Стек", callback_data="flt:noop")]
-    )
+    rows.append([InlineKeyboardButton(text="🛠 Стек", callback_data="flt:noop")])
     stack_row: list[InlineKeyboardButton] = []
     for stack in FILTER_STACKS:
         key = str(stack["key"])
@@ -99,4 +104,18 @@ def filters_keyboard(active_keys: set[str]) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="✅ Готово", callback_data="flt:done"),
         ]
     )
+    rows.append([InlineKeyboardButton(text="🏠 В меню", callback_data="menu:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def format_filter_labels(active_keys: set[str]) -> str:
+    if not active_keys:
+        return "не выбраны (приходят все заказы)"
+    labels: list[str] = []
+    for cat in FILTER_CATEGORIES:
+        if cat["key"] in active_keys:
+            labels.append(str(cat["label"]))
+    for stack in FILTER_STACKS:
+        if stack["key"] in active_keys:
+            labels.append(str(stack["label"]))
+    return ", ".join(labels) if labels else "не выбраны (приходят все заказы)"

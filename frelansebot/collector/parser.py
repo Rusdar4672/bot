@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from collector.extract import Contacts, extract_amounts, extract_contacts, extract_job_meta
 from collector.filters import (
     ACTION_RE,
+    CHAT_NOISE_RE,
+    MODERATION_AUTHOR_RE,
+    MODERATION_STOP_RE,
     PAYMENT_RE,
     RESUME_STOP_RE,
     ROLE_RE,
@@ -11,12 +14,15 @@ from collector.filters import (
 )
 
 MIN_TEXT_LENGTH = 25
+# Короткие сообщения без оплаты/контактов почти всегда трёп, а не вакансия
+MIN_ORDER_LENGTH = 60
 
 # Дополнительные сигналы резюме (не стоп сами по себе, но в сумме режут пост)
 RESUME_SOFT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p)
     for p in (
         r"\bопыт\s+\d+",
+        r"\b\d+\+?\s*год",
         r"\bстаж\b",
         r"\bпортфолио\b",
         r"\bставк[аи]\b",
@@ -28,14 +34,22 @@ RESUME_SOFT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"\bтехнологическ\w*\s+стек\b",
         r"\bпроекты и опыт\b",
         r"\bпиши(те)?\s+в\s+(лс|личку|телеграм)\b",
+        r"(?m)^л[сc]\s*:",
+        r"\bв личке\b",
         r"\bdm me\b",
         r"\bcontact me\b",
         r"github\.io",
+        r"\bмоя команда\b",
+        r"\bнаша команда\b",
+        r"\bпод ключ\b",
+        r"\bберу\b",
     )
 )
 
+# «Если нужен разработчик — пишите» — не интент найма, а самопиар
 EMPLOYER_ACTION_RE = re.compile(
-    r"\b(ищем|нужен|нужна|нужны|требуется|требуются|приглашаем|вакансия|hiring|looking for)\b"
+    r"\b(ищем|требуется|требуются|приглашаем|вакансия|hiring|looking for)\b"
+    r"|(?<!если )(?<!когда )(?<!нужен ли )(?<!нужна ли )\bнуж(ен|на|ны)\b"
 )
 
 
@@ -100,12 +114,20 @@ def _looks_like_resume(normalized: str) -> bool:
     return False
 
 
-def is_junk_content(text: str) -> bool:
-    """True для резюме, рекламы и прочего мусора (в т.ч. уже сохранённого в БД)."""
+def is_junk_content(text: str, author: str | None = None) -> bool:
+    """True для резюме, рекламы, модерации, чат-трёпа и прочего мусора."""
     if not text or len(text.strip()) < MIN_TEXT_LENGTH:
+        return True
+    if author and MODERATION_AUTHOR_RE.search(author.lstrip("@")):
         return True
     normalized = _normalize(text)
     for pattern in SPAM_STOP_RE:
+        if pattern.search(normalized):
+            return True
+    for pattern in MODERATION_STOP_RE:
+        if pattern.search(normalized):
+            return True
+    for pattern in CHAT_NOISE_RE:
         if pattern.search(normalized):
             return True
     return _looks_like_resume(normalized)
@@ -129,7 +151,15 @@ def parse_message(text: str, extra_keywords: list[str] | None = None) -> ParsedM
     meta = extract_job_meta(text)
 
     has_payment = bool(payment) or bool(amounts)
-    is_order = bool(action) and (bool(role) or has_payment or bool(extra))
+    has_contact = bool(contacts.all())
+    is_short = len(text.strip()) < MIN_ORDER_LENGTH
+
+    # Короткие фразы без оплаты/контакта — не заказ (даже если «нужен сайт»)
+    if is_short and not has_payment and not has_contact:
+        is_order = False
+    else:
+        is_order = bool(action) and (bool(role) or has_payment or bool(extra))
+
     matched = list(dict.fromkeys(action + role + payment + extra))
 
     return ParsedMessage(

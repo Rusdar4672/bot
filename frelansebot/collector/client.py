@@ -5,7 +5,7 @@ from telethon import events
 from telethon.tl.types import Channel, Chat, Message
 
 from collector.dedup import order_fingerprint
-from collector.parser import parse_message
+from collector.parser import is_junk_content, parse_message
 from collector.telethon_session import build_telegram_client, persist_string_session
 from config.settings import settings
 from database.engine import async_session
@@ -56,16 +56,23 @@ class MessageCollector:
         me = await self.client.get_me()
         logger.info("Collector started as %s", me.username or me.id)
 
+        # Слушаем новые сообщения сразу — до скана истории
+        @self.client.on(events.NewMessage())
+        async def handler(event: events.NewMessage.Event) -> None:
+            await self._process_message(event)
+
+        logger.info("Listening for new messages (auto-notify ON)...")
+
         if settings.history_scan_limit > 0:
             await self.scan_recent_messages()
         else:
             logger.info("History scan skipped (history_scan_limit=0) — only new messages")
 
-        @self.client.on(events.NewMessage())
-        async def handler(event: events.NewMessage.Event) -> None:
-            await self._process_message(event)
-
-        logger.info("Listening for new messages...")
+        # Догоняем свежие заказы, найденные без notify при скане
+        try:
+            await self.notifier.push_unsent_recent()
+        except Exception as e:
+            logger.warning("Post-scan catch-up failed: %s", e)
 
     async def scan_recent_messages(self) -> None:
         """Проверяет последние N сообщений во всех чатах и каналах."""
@@ -140,6 +147,14 @@ class MessageCollector:
         if not _is_message_fresh(message):
             return False
 
+        author = None
+        sender = await message.get_sender()
+        if sender:
+            author = getattr(sender, "username", None) or str(getattr(sender, "id", ""))
+
+        if is_junk_content(message.text, author=author):
+            return False
+
         parsed = parse_message(message.text)
         if not parsed.is_order:
             return False
@@ -166,11 +181,6 @@ class MessageCollector:
                 return False
 
             link = self._build_message_link(username, chat_id, message.id)
-
-            author = None
-            sender = await message.get_sender()
-            if sender:
-                author = getattr(sender, "username", None) or str(getattr(sender, "id", ""))
 
             published_at = getattr(message, "date", None)
             if published_at is not None and published_at.tzinfo is not None:

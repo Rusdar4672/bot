@@ -1,8 +1,9 @@
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import BotCommand, Message
 
-from bot.keyboards.main import BTN_HELP, BTN_OLDER, MAIN_KB
+from bot.handlers.menu import send_main_menu
+from bot.keyboards.main import BTN_HELP, BTN_OLDER, MAIN_KB, back_to_menu_keyboard
 from database.engine import async_session
 from database.repository import Repository
 
@@ -10,23 +11,29 @@ router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, bot: Bot) -> None:
     async with async_session() as session:
         repo = Repository(session)
         await repo.get_or_create_user(message.from_user.id, message.from_user.username)
         await session.commit()
 
+    await bot.set_my_commands(
+        [
+            BotCommand(command="menu", description="Главное меню"),
+            BotCommand(command="orders", description="Свежие заказы"),
+            BotCommand(command="older", description="Архив старше недели"),
+            BotCommand(command="filters", description="Настроить фильтры"),
+            BotCommand(command="notify", description="Статус уведомлений"),
+            BotCommand(command="help", description="Справка"),
+        ]
+    )
+
     await message.answer(
-        "👋 Привет! Я бот для сбора фриланс-заказов из Telegram-чатов и каналов.\n\n"
-        "Я автоматически мониторю подключённые источники и присылаю тебе "
-        "новые заказы и приглашения на работу.\n\n"
-        "Используй кнопки ниже или команды:\n"
-        "/orders — свежие заказы за неделю\n"
-        f"/older или «{BTN_OLDER}» — архив старше недели\n"
-        "/filters — настроить фильтры\n"
-        "/help — справка",
+        "👋 Привет! Собираю фриланс-заказы из Telegram.\n"
+        "Новые подходящие заказы приходят сами.",
         reply_markup=MAIN_KB,
     )
+    await send_main_menu(message)
 
 
 @router.message(Command("help"))
@@ -34,15 +41,17 @@ async def cmd_start(message: Message) -> None:
 async def cmd_help(message: Message) -> None:
     await message.answer(
         "<b>Как это работает</b>\n\n"
-        "1. Администратор подключает Telegram-аккаунт (Telethon) к чатам и каналам\n"
-        "2. Бот анализирует новые сообщения по ключевым словам\n"
-        "3. Найденные заказы сохраняются и рассылаются подписчикам\n\n"
+        "1. Бот слушает чаты и каналы через Telethon\n"
+        "2. Отсекает резюме, рекламу и трёп\n"
+        "3. Подходящие заказы приходят тебе автоматически\n\n"
+        "<b>Управление</b>\n"
+        "🏠 Меню — панель управления\n"
+        "⚙️ Фильтры — категории и стек\n"
+        "📋 Заказы — свежие за неделю\n"
+        f"📂 Архив / «{BTN_OLDER}» — старше недели\n"
+        "🔔 Уведомления — пауза / возобновление пушей\n\n"
         "<b>Команды</b>\n"
-        "/orders — свежие заказы за неделю (по фильтрам)\n"
-        f"/older или «{BTN_OLDER}» — все подходящие старше недели\n"
-        "/filters — настроить фильтры по категориям и стеку\n\n"
-        "<b>Для администраторов</b>\n"
-        "/stats — статистика",
+        "/menu /orders /older /filters /notify /help",
         parse_mode="HTML",
-        reply_markup=MAIN_KB,
+        reply_markup=back_to_menu_keyboard(),
     )

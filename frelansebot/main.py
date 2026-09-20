@@ -69,6 +69,7 @@ async def main() -> None:
 
     bot, dp = create_bot()
     notifier = Notifier(bot)
+    notifier.start()
     collector = MessageCollector(notifier)
 
     logger.info("Starting collector...")

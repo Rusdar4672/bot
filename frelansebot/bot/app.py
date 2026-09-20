@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-from bot.handlers import admin, orders, start
+from bot.handlers import admin, menu, orders, start
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ def create_bot() -> tuple[Bot, Dispatcher]:
     )
     dp = Dispatcher()
     dp.include_router(start.router)
+    dp.include_router(menu.router)
     dp.include_router(orders.router)
     dp.include_router(admin.router)
     return bot, dp

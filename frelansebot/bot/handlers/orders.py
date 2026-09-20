@@ -6,8 +6,16 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from bot.keyboards.main import BTN_OLDER, MAIN_KB, filters_keyboard, older_orders_keyboard
-from collector.filters import FILTER_CATEGORIES, FILTER_STACKS
+from bot.keyboards.main import (
+    BTN_FILTERS,
+    BTN_OLDER,
+    BTN_ORDERS,
+    MAIN_KB,
+    back_to_menu_keyboard,
+    filters_keyboard,
+    format_filter_labels,
+    older_orders_keyboard,
+)
 from config.settings import settings
 from database.engine import async_session
 from database.repository import Repository
@@ -41,7 +49,7 @@ async def _load_older_filtered_orders(telegram_id: int, username: str | None):
         )
         orders = pick_orders_for_filters([], pool, user_keys, limit=OLDER_ORDERS_LIMIT)
         total_matched = sum(
-            1 for o in pool if order_matches_user_filters(o.text, user_keys)
+            1 for o in pool if order_matches_user_filters(o.text, user_keys, author=o.author)
         )
         return orders, total_matched, user_keys
 
@@ -81,7 +89,7 @@ async def _send_older_orders(bot: Bot, chat_id: int, telegram_id: int, username:
 
 
 @router.message(Command("orders"))
-@router.message(lambda m: m.text == "📋 Последние заказы")
+@router.message(F.text == BTN_ORDERS)
 async def cmd_orders(message: Message, bot: Bot) -> None:
     async with async_session() as session:
         repo = Repository(session)
@@ -105,7 +113,7 @@ async def cmd_orders(message: Message, bot: Bot) -> None:
             limit=100,
         )
         older_count = sum(
-            1 for o in older_pool if order_matches_user_filters(o.text, user_keys)
+            1 for o in older_pool if order_matches_user_filters(o.text, user_keys, author=o.author)
         )
 
     if not orders:
@@ -123,7 +131,7 @@ async def cmd_orders(message: Message, bot: Bot) -> None:
                 reply_markup=older_orders_keyboard(),
             )
         else:
-            text += "Подожди новые посты или ослабь фильтры в «⚙️ Мои фильтры»."
+            text += "Подожди новые посты или ослабь фильтры в «⚙️ Фильтры»."
             await message.answer(text, parse_mode="HTML", reply_markup=MAIN_KB)
         return
 
@@ -138,7 +146,7 @@ async def cmd_orders(message: Message, bot: Bot) -> None:
 
     if older_count:
         await message.answer(
-            f"Ещё <b>{older_count}</b> подходящих заказов старше недели — кнопка «{BTN_OLDER}» ниже.",
+            f"Ещё <b>{older_count}</b> подходящих заказов старше недели — кнопка «{BTN_OLDER}».",
             parse_mode="HTML",
             reply_markup=MAIN_KB,
         )
@@ -169,25 +177,12 @@ async def cb_older_orders(callback: CallbackQuery, bot: Bot) -> None:
     )
 
 
-def _format_active_labels(active_keys: set[str]) -> str:
-    if not active_keys:
-        return "не выбраны (все заказы)"
-    labels: list[str] = []
-    for cat in FILTER_CATEGORIES:
-        if cat["key"] in active_keys:
-            labels.append(str(cat["label"]))
-    for stack in FILTER_STACKS:
-        if stack["key"] in active_keys:
-            labels.append(str(stack["label"]))
-    return ", ".join(labels) if labels else "не выбраны (все заказы)"
-
-
 def _filters_text(active: set[str]) -> str:
     return (
         "⚙️ <b>Настройка фильтров</b>\n\n"
         "Отметь категории и/или стек.\n"
         "Нажми ещё раз — снять ✅.\n\n"
-        f"Сейчас активны: <b>{_format_active_labels(active)}</b>"
+        f"Сейчас активны: <b>{format_filter_labels(active)}</b>"
     )
 
 
@@ -205,7 +200,7 @@ async def _edit_filters_menu(callback: CallbackQuery, active: set[str]) -> None:
 
 
 @router.message(Command("filters"))
-@router.message(lambda m: m.text == "⚙️ Мои фильтры")
+@router.message(F.text == BTN_FILTERS)
 async def cmd_filters(message: Message) -> None:
     async with async_session() as session:
         repo = Repository(session)
@@ -244,14 +239,15 @@ async def cb_filter_toggle(callback: CallbackQuery) -> None:
 
         if action == "done":
             await session.commit()
-            label = _format_active_labels(active)
+            label = format_filter_labels(active)
             try:
                 await callback.message.edit_text(
                     f"✅ <b>Фильтры сохранены!</b>\n\n"
                     f"Активно: <b>{label}</b>\n\n"
                     "Если выбраны и категории, и стеки — заказ должен подойти и по теме, и по стеку.\n"
-                    "Чтобы изменить — /filters или «⚙️ Мои фильтры».",
+                    "Чтобы изменить — /filters или «⚙️ Фильтры».",
                     parse_mode="HTML",
+                    reply_markup=back_to_menu_keyboard(),
                 )
             except TelegramBadRequest as e:
                 logger.warning("Failed to close filters menu: %s", e)

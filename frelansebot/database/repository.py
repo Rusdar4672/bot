@@ -45,10 +45,12 @@ class Repository:
 
     async def order_exists(self, source_id: int, message_id: int) -> bool:
         result = await self.session.execute(
-            select(Order.id).where(
+            select(Order.id)
+            .where(
                 Order.source_id == source_id,
                 Order.message_id == message_id,
             )
+            .limit(1)
         )
         return result.scalar_one_or_none() is not None
 
